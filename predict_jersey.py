@@ -14,8 +14,10 @@ import cv2
 import random
 import torch
 from tensorflow.keras.preprocessing.image import array_to_img
+import requests
 
 def get_last_frame(video_url):
+  print("In get_last_frame")
   cap = cv2.VideoCapture(video_url)
   total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
@@ -28,11 +30,13 @@ def get_last_frame(video_url):
   return frame
 
 def load_person_dect_model(video_url):
+  print("In load_person_dect_model")
   model = YOLO('yolov8m.pt')
   results = model.track(source=video_url, conf=0.25, save=True, tracker='bytetrack.yaml', classes=0)
   return results
 
 def get_tapped_box(results, tap_coord):
+  print("In get_tapped_box")
   last_frame_index = len(results) - 1
   last_frame_boxes = results[last_frame_index].boxes.xyxy.tolist()
   required_track_id = None
@@ -47,6 +51,7 @@ def get_tapped_box(results, tap_coord):
   return None
 
 def get_jersey_color(last_frame_image, tap_coord):
+    print("In get_jersey_color")
     cropped_img = None
     player_found = None
 
@@ -79,18 +84,20 @@ def get_jersey_color(last_frame_image, tap_coord):
     red_pixels = cv2.countNonZero(mask_red)
     red_percentage = (red_pixels / total_pixels) * 100
 
-    red_threshold = 15
+    red_threshold = 10
     if red_percentage >= red_threshold:
         return True
     else:
         return False
 
 def load_jersey_dect_model():
+  print("In load_jersey_dect_model")
   jersey_model = torch.hub.load('ultralytics/yolov5', 'custom', path='yolov5ID_640_100epoch.pt')
   jersey_model.load_state_dict(torch.load('yolov5ID_640_100epoch.pt')['model'].state_dict(), strict=False)
   return jersey_model
 
 def clear_output_folder():
+  print("In clear_output_folder")
   output_folder = 'cropped_images'
 
   if os.path.exists(output_folder):
@@ -98,6 +105,7 @@ def clear_output_folder():
   os.makedirs(output_folder)
 
 def pre_process_images(results, required_track_id):
+  print("In pre_process_images")
   image_paths = []
   output_folder = 'cropped_images'
 
@@ -131,6 +139,7 @@ def pre_process_images(results, required_track_id):
   return image_paths
 
 def predict_number(img, model):
+  print("In predict_number")
   im = array_to_img(img)
   output = model(im)
   results = output.pandas().xyxy[0].to_dict(orient="records")
@@ -139,6 +148,7 @@ def predict_number(img, model):
       return cs
 
 def get_jersey_number(image_paths, model):
+  print("In get_jersey_number")
   num_dict = {}
 
   for path in image_paths:
@@ -158,11 +168,31 @@ def get_jersey_number(image_paths, model):
   return max(num_dict, key=num_dict.get)
 
 
+def download_video(video_url, save_path):
+    print("In download_video")
+    response = requests.get(video_url, stream=True)
+    
+    if response.status_code == 200:
+        with open(save_path, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=1024*1024):
+                file.write(chunk)
+        return True
+    else:
+        return False
+
+
+
 def predict_jersey(video_url, tap_coords):
   dp.clear_output()
-  last_frame_image = get_last_frame(video_url)
+
+  video_filename = 'video.mp4'
+  download_path = os.path.join('.', video_filename)
+  if not download_video(video_url, download_path):
+      return "Failed to download the video"
+
+  last_frame_image = get_last_frame(video_filename)
   if get_jersey_color(last_frame_image, tap_coords):
-    results = load_person_dect_model(video_url)
+    results = load_person_dect_model(video_filename)
     bbox_id = get_tapped_box(results, tap_coords)
     if bbox_id == None:
       return "Not a player"
