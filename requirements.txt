@@ -8,6 +8,5 @@ numpy
 torch
 tensorflow
 requests
-json
 uvicorn
 fastapi
