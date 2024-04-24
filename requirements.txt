@@ -10,3 +10,4 @@ tensorflow
 requests
 uvicorn
 fastapi
+ipython
