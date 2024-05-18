@@ -4,6 +4,8 @@ import uvicorn
 from predict_jersey import predict_jersey
 from pydantic import BaseModel
 import json
+from pyngrok import ngrok, conf
+import nest_asyncio
 
 class model_input(BaseModel):
   video : str
@@ -36,3 +38,12 @@ async def predict_jersey_number(input_parameters : model_input):
     print("Starting frame: ", starting_frame)
     number = predict_jersey(input_dictionary['video'], tap_coords, starting_frame, ending_frame)
     return {"jersey_number": number}
+
+if __name__ == "__main__":
+  print("Enter your authtoken, which can be copied from https://dashboard.ngrok.com/get-started/your-authtoken")
+  conf.get_default().auth_token = "2f12n34CoKYGCV5XWBXCgwZ6Frx_4vpCZthbo8DF4eHgkpVoA"
+
+  ngrok_tunnel = ngrok.connect(8000)
+  print('Public URL:', ngrok_tunnel.public_url)
+  nest_asyncio.apply()
+  uvicorn.run(app, port=8000)
