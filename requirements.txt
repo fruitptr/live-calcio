@@ -11,3 +11,6 @@ requests
 uvicorn
 fastapi
 ipython
+pydantic
+pypi-json
+ffmpeg-python

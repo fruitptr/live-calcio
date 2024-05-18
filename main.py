@@ -9,6 +9,7 @@ class model_input(BaseModel):
   video : str
   x : int
   y : int
+  timestamp : int
 
 app = FastAPI()
 
@@ -26,5 +27,12 @@ async def predict_jersey_number(input_parameters : model_input):
     input_data = input_parameters.json()
     input_dictionary = json.loads(input_data)
     tap_coords = (input_dictionary['x'], input_dictionary['y'])
-    number = predict_jersey(input_dictionary['video'], tap_coords)
+    timestamp = input_dictionary['timestamp']
+    ending_frame = round((timestamp / 1000) * 30)
+    print("Ending frame: ", ending_frame)
+    starting_frame = ending_frame - 50
+    if starting_frame < 0:
+      starting_frame = 0
+    print("Starting frame: ", starting_frame)
+    number = predict_jersey(input_dictionary['video'], tap_coords, starting_frame, ending_frame)
     return {"jersey_number": number}

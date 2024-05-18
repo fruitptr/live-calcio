@@ -15,6 +15,19 @@ import random
 import torch
 from tensorflow.keras.preprocessing.image import array_to_img
 import requests
+import math
+import ffmpeg
+
+def trim_video(starting_frame, ending_frame):
+  print("In trim video")
+  print("Start frame: ", starting_frame)
+  print("End frame: ", ending_frame)
+  if os.path.exists('video.mp4'):
+        os.remove('video.mp4')
+        print("Deleted existing 'video.mp4'")
+  input_file = ffmpeg.input('origVideo.mp4')
+  output_file = ffmpeg.output(input_file.trim(start_frame=starting_frame, end_frame=ending_frame).setpts('PTS-STARTPTS'), 'video.mp4')
+  ffmpeg.run(output_file)
 
 def get_last_frame(video_url):
   print("In get_last_frame")
@@ -36,46 +49,76 @@ def load_person_dect_model(video_url):
   return results
 
 def get_tapped_box(results, tap_coord):
-  print("In get_tapped_box")
-  last_frame_index = len(results) - 1
-  last_frame_boxes = results[last_frame_index].boxes.xyxy.tolist()
-  required_track_id = None
+    print("In get_tapped_box")
+    last_frame_index = len(results) - 1
+    last_frame_boxes = results[last_frame_index].boxes.xyxy.tolist()
+    required_track_id = None
+    min_distance = float('inf')
 
-  for index, box in enumerate(last_frame_boxes):
-      x_min, y_min, x_max, y_max = box
-      if x_min <= tap_coord[0] <= x_max and y_min <= tap_coord[1] <= y_max:
-          required_track_id = results[last_frame_index].boxes[index].id.tolist()[0]
-          print("Tracking ID: ", required_track_id)
-          return required_track_id
+    for index, box in enumerate(last_frame_boxes):
+        x_min, y_min, x_max, y_max = box
+        box_center = ((x_min + x_max) / 2, (y_min + y_max) / 2)
+        tap_distance = math.sqrt((tap_coord[0] - box_center[0]) ** 2 + (tap_coord[1] - box_center[1]) ** 2)
 
-  return None
+        if tap_distance < min_distance:
+            min_distance = tap_distance
+            required_track_id = results[last_frame_index].boxes[index].id.tolist()[0]
+            print("Tracking ID: ", required_track_id)
+
+    return required_track_id if required_track_id is not None else None
 
 def get_jersey_color(last_frame_image, tap_coord):
     print("In get_jersey_color")
     cropped_img = None
-    player_found = None
+    player_found = False
 
     model = YOLO('yolov8m.pt')
     frame_result = model.predict(source='last_frame.png', conf=0.25, save=True, classes=0)
     last_frame_boxes = frame_result[0].boxes.xyxy.tolist()
+    print("LAST FRAME BOXES: ")
+    print(last_frame_boxes)
+
+    min_distance = float('inf')
+    closest_box = None
+
+    print("Tap Coord:", tap_coord)
 
     for index, box in enumerate(last_frame_boxes):
         x_min, y_min, x_max, y_max = map(int, box)
-        if x_min <= tap_coord[0] <= x_max and y_min <= tap_coord[1] <= y_max:
-            cropped_img = last_frame_image[y_min:y_min + (y_max - y_min) // 2, x_min:x_max].copy()
-            cv2.imwrite('cropped_frame.png', cropped_img)
-            player_found = True
-            break
+        box_center = ((x_min + x_max) / 2, (y_min + y_max) / 2)
+        tap_distance = math.sqrt((tap_coord[0] - box_center[0]) ** 2 + (tap_coord[1] - box_center[1]) ** 2)
 
-    if player_found is False:
-        return "Not a player"
+        if tap_distance < min_distance:
+            min_distance = tap_distance
+            closest_box = box
+
+    print("Min distance: ", min_distance)
+    if min_distance > 300:
+      return False
+
+    if closest_box is not None:
+        x_min, y_min, x_max, y_max = map(int, closest_box)
+        y_max = (y_min + y_max) // 2
+        cropped_img = last_frame_image[y_min:y_max, x_min:x_max].copy()
+        player_found = True
+        print("Cropping frame")
+        cv2.imwrite('cropped_frame.png', cropped_img)
+
+    if not player_found:
+        return False
 
     hsv_cropped_img = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2HSV)
 
-    lower_red = np.array([155, 25, 0])
-    upper_red = np.array([179, 255, 255])
+    lower_red = np.array([0,50,50])
+    upper_red = np.array([10,255,255])
+    mask0 = cv2.inRange(hsv_cropped_img, lower_red, upper_red)
 
-    mask_red = cv2.inRange(hsv_cropped_img, lower_red, upper_red)
+    lower_red = np.array([170,50,50])
+    upper_red = np.array([180,255,255])
+    mask1 = cv2.inRange(hsv_cropped_img, lower_red, upper_red)
+
+    mask_red = mask0+mask1
+
     cv2.imwrite('mask_red.png', mask_red)
 
     cropped_img_gray = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2GRAY)
@@ -84,7 +127,8 @@ def get_jersey_color(last_frame_image, tap_coord):
     red_pixels = cv2.countNonZero(mask_red)
     red_percentage = (red_pixels / total_pixels) * 100
 
-    red_threshold = 10
+    red_threshold = 15
+    print("Red percentage: ", red_percentage)
     if red_percentage >= red_threshold:
         return True
     else:
@@ -98,7 +142,7 @@ def load_jersey_dect_model():
 
 def clear_output_folder():
   print("In clear_output_folder")
-  output_folder = 'cropped_images'
+  output_folder = 'cropped_images/'
 
   if os.path.exists(output_folder):
       shutil.rmtree(output_folder)
@@ -107,7 +151,7 @@ def clear_output_folder():
 def pre_process_images(results, required_track_id):
   print("In pre_process_images")
   image_paths = []
-  output_folder = 'cropped_images'
+  output_folder = 'cropped_images/'
 
   for result_index, result in enumerate(results):
       for box_index, box in enumerate(result.boxes):
@@ -168,26 +212,28 @@ def get_jersey_number(image_paths, model):
   return max(num_dict, key=num_dict.get)
 
 
-def download_video(video_url, save_path):
+def download_video(video_url, save_path, starting_frame, ending_frame):
     print("In download_video")
     response = requests.get(video_url, stream=True)
-    
+
     if response.status_code == 200:
         with open(save_path, 'wb') as file:
             for chunk in response.iter_content(chunk_size=1024*1024):
                 file.write(chunk)
+        print("Video downloaded")
+        trim_video(starting_frame, ending_frame)
         return True
     else:
         return False
 
 
 
-def predict_jersey(video_url, tap_coords):
+def predict_jersey(video_url, tap_coords, starting_frame, ending_frame):
   dp.clear_output()
 
   video_filename = 'video.mp4'
-  download_path = os.path.join('.', video_filename)
-  if not download_video(video_url, download_path):
+  download_path = os.path.join('.', 'origVideo.mp4')
+  if not download_video(video_url, download_path, starting_frame, ending_frame):
       return "Failed to download the video"
 
   last_frame_image = get_last_frame(video_filename)
@@ -207,9 +253,3 @@ def predict_jersey(video_url, tap_coords):
         return jersey_number
   else:
     return "Not a player (Jersey color is not red)"
-
-# if __name__ == "__main__":
-#   video_url = 'unitedvseverton1080p.mp4'
-#   tap_coords = ((469, 517))
-#   number = predict_jersey(video_url, tap_coords)
-#   print("Jersey number is: ", number)
